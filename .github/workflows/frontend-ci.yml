@@ -5,17 +5,18 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - 'starter/frontend/**'
 
 jobs:
-  Linting:
+  lint:
     runs-on: ubuntu-latest
-    environment: Devlopmnet Environment
 
     steps:
-    - name: Check the Repository
+    - name: Checkout Repository
       uses: actions/checkout@v3
 
-    - name: Use Node.js 18
+    - name: Setup Node.js 18
       uses: actions/setup-node@v3
       with:
         node-version: 18
@@ -26,47 +27,52 @@ jobs:
       working-directory: starter/frontend
       run: npm ci
 
-    - name: Checkout Run Lint
-      run: cd starter/frontend && npm run lint
+    - name: Run Lint
+      working-directory: starter/frontend
+      run: npm run lint
 
-  Test:
+  test:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Check the Repository
+    - name: Checkout Repository
       uses: actions/checkout@v3
 
-    - name: Use Node.js 18
+    - name: Setup Node.js 18
       uses: actions/setup-node@v3
       with:
         node-version: 18
         cache: 'npm'
         cache-dependency-path: starter/frontend/package-lock.json
+        
     - name: Install Dependencies
       working-directory: starter/frontend
       run: npm ci
   
-    - name: Test
-      run: cd starter/frontend && npm run test
+    - name: Run Tests
+      working-directory: starter/frontend
+      run: npm run test -- --coverage --watchAll=false
       
-  Build:
-    needs: [Linting, Test]
+  build:
+    needs: [lint, test]
     runs-on: ubuntu-latest
     
     steps:
-    - name: Check the Repository
+    - name: Checkout Repository
       uses: actions/checkout@v3
     
-    - name: Use Node.js 18
+    - name: Setup Node.js 18
       uses: actions/setup-node@v3
       with:
         node-version: 18
         cache: 'npm'
         cache-dependency-path: starter/frontend/package-lock.json
 
-    - name: Build and Run Docker Image
-      run: |
-        cd starter/frontend
-        docker build --build-arg=REACT_APP_MOVIE_API_URL=http://localhost:5000 --tag=mp-frontend:latest .
-        docker run --name mp-frontend -p 3000:3000 -d mp-frontend
+    - name: Install Dependencies
+      working-directory: starter/frontend
+      run: npm ci
+
+    - name: Build Docker Image
+      working-directory: starter/frontend
+      run: docker build --tag=mp-frontend:latest .
 

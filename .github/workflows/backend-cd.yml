@@ -2,17 +2,18 @@ name: Backend Continuous Deployment
 
 on:
   workflow_dispatch:
-  pull_request:
+  push:
     branches:
       - main
+    paths:
+      - 'starter/backend/**'
 
 jobs:
-  Linting:
+  lint:
     runs-on: ubuntu-latest
-    environment: Devlopmnet Environment
 
     steps:
-    - name: Check the Repository
+    - name: Checkout Repository
       uses: actions/checkout@v3
 
     - name: Setup Python
@@ -20,79 +21,97 @@ jobs:
       with:
         python-version: "3.10"
 
-    - name: Install Rependencies
-      working-directory: starter/backend 
-      run:  |
-        python -m pip install --upgrade pip
-        pip install pipenv
-        pip install flake8
-
-    - name: Checkout Run Lint
-      run: cd starter/backend && pipenv run lint
-
-  Test:
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Check the Repository
-      uses: actions/checkout@v3
-
-    - name: Use Python 3
-      uses:  actions/setup-python@v4
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
       with:
-        python-version: "3.10"
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('starter/backend/Pipfile.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
 
     - name: Install Dependencies
       working-directory: starter/backend 
-      run:  |
+      run: |
         python -m pip install --upgrade pip
         pip install pipenv
-        pip install flake8
+        pipenv install --dev
 
-    - name: Test
-      run: cd starter/backend && pipenv install pytest && pipenv run test
+    - name: Run Lint
+      working-directory: starter/backend
+      run: pipenv run lint
 
-      
-  Build:
-    needs: [Linting, Test]
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('starter/backend/Pipfile.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install Dependencies
+      working-directory: starter/backend 
+      run: |
+        python -m pip install --upgrade pip
+        pip install pipenv
+        pipenv install --dev
+
+    - name: Run Tests
+      working-directory: starter/backend
+      run: pipenv run test
+
+  build-and-deploy:
+    needs: [lint, test]
     runs-on: ubuntu-latest
     
     steps:
-    - name: Check the Repository
+    - name: Checkout Repository
       uses: actions/checkout@v3
-
-
 
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v2
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-session-token: ${{secrets.AWS_SESSION_TOKEN}}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
         aws-region: us-east-1
         
-    - name: Login to Amazon
+    - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
     - name: Build and Push Docker Image
       working-directory: starter/backend
       env:
-        IMAGE_TAG: latest
-        REPO_NAME: backend
+        ECR_REGISTRY: 602505183913.dkr.ecr.us-east-1.amazonaws.com
+        ECR_REPOSITORY: backend
+        IMAGE_TAG: ${{ github.sha }}
       run: |
-        docker build --build-arg=REACT_APP_MOVIE_API_URL=http://localhost:5000 --tag 669172573612.dkr.ecr.us-east-1.amazonaws.com/$REPO_NAME:$IMAGE_TAG .
-        docker push 669172573612.dkr.ecr.us-east-1.amazonaws.com/$REPO_NAME:$IMAGE_TAG
-    - name: Update Kubeconfig
-      run:
-       aws eks update-kubeconfig --name udacity-project4 --region us-east-1
+        docker build --tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-    - name: Deploy Docker Image to Amazon EKS
+    - name: Configure Kubeconfig
+      run: aws eks update-kubeconfig --name cluster --region us-east-1
+
+    - name: Deploy to EKS
       working-directory: starter/backend/k8s
       env:
-        IMAGE_TAG: latest
-        REPO_NAME: backend
+        ECR_REGISTRY: 602505183913.dkr.ecr.us-east-1.amazonaws.com
+        ECR_REPOSITORY: backend
+        IMAGE_TAG: ${{ github.sha }}
       run: |
-        aws eks update-kubeconfig --name udacity-project4 --region us-east-1
-        kustomize edit set image backend=669172573612.dkr.ecr.us-east-1.amazonaws.com/$REPO_NAME:$IMAGE_TAG
+        kustomize edit set image backend=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         kustomize build | kubectl apply -f -

@@ -5,17 +5,18 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'starter/frontend/**'
 
 jobs:
-  Linting:
+  lint:
     runs-on: ubuntu-latest
-    environment: Devlopmnet Environment
 
     steps:
-    - name: Check the Repository
+    - name: Checkout Repository
       uses: actions/checkout@v3
 
-    - name: Use Node.js 18
+    - name: Setup Node.js 18
       uses: actions/setup-node@v3
       with:
         node-version: 18
@@ -26,17 +27,18 @@ jobs:
       working-directory: starter/frontend
       run: npm ci
 
-    - name: Checkout Run Lint
-      run: cd starter/frontend && npm run lint
+    - name: Run Lint
+      working-directory: starter/frontend
+      run: npm run lint
 
-  Test:
+  test:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Check the Repository
+    - name: Checkout Repository
       uses: actions/checkout@v3
 
-    - name: Use Node.js 18
+    - name: Setup Node.js 18
       uses: actions/setup-node@v3
       with:
         node-version: 18
@@ -47,61 +49,51 @@ jobs:
       working-directory: starter/frontend
       run: npm ci
   
-    - name: Test
-      run: cd starter/frontend && npm run test
+    - name: Run Tests
+      working-directory: starter/frontend
+      run: npm run test -- --coverage --watchAll=false
 
-
-
-  Build:
-    needs: [Linting, Test]
+  build-and-deploy:
+    needs: [lint, test]
     runs-on: ubuntu-latest
     
     steps:
-    - name: Check the Repository
+    - name: Checkout Repository
       uses: actions/checkout@v3
-    
-    - name: Use Node.js 18
-      uses: actions/setup-node@v3
-      with:
-        node-version: 18
-        cache: 'npm'
-        cache-dependency-path: starter/frontend/package-lock.json
 
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v2
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-session-token: ${{secrets.AWS_SESSION_TOKEN}}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
         aws-region: us-east-1
-  
 
-    - name: Login to Amazon 
+    - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
-
-
 
     - name: Build and Push Docker Image
       working-directory: starter/frontend
       env:
-        IMAGE_TAG: latest
-        REPO_NAME: frontend
+        ECR_REGISTRY: 602505183913.dkr.ecr.us-east-1.amazonaws.com
+        ECR_REPOSITORY: frontend
+        IMAGE_TAG: ${{ github.sha }}
       run: |
-        docker build --build-arg=REACT_APP_MOVIE_API_URL=http://localhost:5000 --tag 669172573612.dkr.ecr.us-east-1.amazonaws.com/$REPO_NAME:$IMAGE_TAG .
-        docker push 669172573612.dkr.ecr.us-east-1.amazonaws.com/$REPO_NAME:$IMAGE_TAG
-    
+        docker build --build-arg REACT_APP_MOVIE_API_URL=http://backend-service:5000 --tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
     - name: Configure Kubeconfig
-      run:
-       aws eks update-kubeconfig --name udacity-project4 --region us-east-1
+      run: aws eks update-kubeconfig --name cluster --region us-east-1
 
-
-    - name: Deploy Docker Image to Amazon EKS
+    - name: Deploy to EKS
       working-directory: starter/frontend/k8s
       env:
-        IMAGE_TAG: latest
-        REPO_NAME: frontend
+        ECR_REGISTRY: 602505183913.dkr.ecr.us-east-1.amazonaws.com
+        ECR_REPOSITORY: frontend
+        IMAGE_TAG: ${{ github.sha }}
       run: |
-          kustomize edit set image frontend=669172573612.dkr.ecr.us-east-1.amazonaws.com/$REPO_NAME:$IMAGE_TAG
-          kustomize build | kubectl apply -f -
+        kustomize edit set image frontend=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        kustomize build | kubectl apply -f -
