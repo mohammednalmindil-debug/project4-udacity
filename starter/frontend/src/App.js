@@ -12,7 +12,7 @@ export default function App() {
 
   return (
     <div className="container">
-      <h1>My Movie List - Connected</h1>
+      <h1>My Movie List - Fixed</h1>
 
       <MovieList onMovieClick={handleMovieClick} />
 
