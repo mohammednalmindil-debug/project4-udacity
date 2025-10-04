@@ -1,5 +1,7 @@
 # CI/CD Pipeline Setup for Movie Application
 
+<!-- Updated: Backend service configuration fixed -->
+
 This project contains GitHub Actions workflows for Continuous Integration (CI) and Continuous Deployment (CD) of both frontend and backend applications.
 
 ## Workflows Overview
