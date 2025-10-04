@@ -90,7 +90,7 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push image to Amazon ECR
+      - name: Build Docker image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: backend
@@ -99,6 +99,14 @@ jobs:
           cd starter/backend
           echo "Building Docker image..."
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          echo "Docker image built successfully"
+
+      - name: Push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: backend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
           echo "Pushing Docker image..."
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "Docker image pushed successfully"
@@ -112,19 +120,72 @@ jobs:
         with:
           version: "latest"
 
+      - name: Create deployment manifest
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "Creating deployment manifest..."
+          cat > deployment.yaml << EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: backend
+            labels:
+              app: backend
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: backend
+            template:
+              metadata:
+                labels:
+                  app: backend
+              spec:
+                containers:
+                  - name: backend
+                    image: $ECR_REGISTRY/backend:$IMAGE_TAG
+                    imagePullPolicy: Always
+                    ports:
+                      - containerPort: 5000
+                    resources:
+                      requests:
+                        memory: "64Mi"
+                        cpu: "250m"
+                      limits:
+                        memory: "128Mi"
+                        cpu: "500m"
+          EOF
+          echo "Deployment manifest created"
+
+      - name: Create service manifest
+        run: |
+          echo "Creating service manifest..."
+          cat > service.yaml << EOF
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: backend
+            labels:
+              app: backend
+          spec:
+            type: LoadBalancer
+            selector:
+              app: backend
+            ports:
+              - protocol: TCP
+                port: 80
+                targetPort: 5000
+          EOF
+          echo "Service manifest created"
+
       - name: Deploy to EKS
         run: |
-          cd starter/backend/k8s
-          echo "Current directory: $(pwd)"
-          echo "Files in directory: $(ls -la)"
-          echo "Original deployment.yaml:"
-          cat deployment.yaml
-          echo "Updating image in deployment.yaml..."
-          sed -i "s|image: backend|image: ${{ steps.login-ecr.outputs.registry }}/backend:${{ github.sha }}|g" deployment.yaml
-          echo "Updated deployment.yaml:"
-          cat deployment.yaml
           echo "Applying Kubernetes manifests..."
-          kubectl apply -f .
+          kubectl apply -f deployment.yaml
+          kubectl apply -f service.yaml
+          echo "Deployment completed"
           echo "Checking pod status..."
           kubectl get pods
           echo "Checking services..."
