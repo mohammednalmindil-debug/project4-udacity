@@ -125,11 +125,22 @@ jobs:
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
         with:
-          version: 'latest'
+          version: "latest"
 
       - name: Deploy to EKS
         run: |
           cd starter/frontend/k8s
+          echo "Current directory: $(pwd)"
+          echo "Files in directory: $(ls -la)"
+          echo "Original deployment.yaml:"
+          cat deployment.yaml
+          echo "Updating image in deployment.yaml..."
           sed -i "s|image: frontend|image: ${{ steps.login-ecr.outputs.registry }}/frontend:${{ github.sha }}|g" deployment.yaml
+          echo "Updated deployment.yaml:"
+          cat deployment.yaml
+          echo "Applying Kubernetes manifests..."
           kubectl apply -f .
+          echo "Checking pod status..."
           kubectl get pods
+          echo "Checking services..."
+          kubectl get services
